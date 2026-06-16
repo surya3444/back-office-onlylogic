@@ -52,6 +52,36 @@ service cloud.firestore {
       allow read:  if true;                        // public storefront
       allow write: if canWrite('products');
     }
+
+    // Client projects. Public portal reads one project by its unguessable id and
+    // makes only two narrow, field-scoped writes: submitting the requirements
+    // form, and (via the payment verify route) marking a milestone paid.
+    match /projects/{id} {
+      allow read: if true;
+      allow create, delete: if canWrite('projects');
+      allow update: if canWrite('projects')
+        || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['requirementForm'])
+        || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['payment']);
+
+      match /comments/{cid} {
+        allow read:   if true;                     // portal shows the thread
+        allow create: if true;                     // clients post feedback
+        allow update, delete: if canWrite('projects');
+      }
+    }
+
+    // Our own in-house product builds — back-office only.
+    match /ourProjects/{id} {
+      allow read:  if canRead('projects');
+      allow write: if canWrite('projects');
+    }
+
+    // Collection-group read for stage feedback: the Projects Dashboard aggregates
+    // comments across every project. (Per-project access is covered above; a
+    // collectionGroup query needs its own rule and is back-office only.)
+    match /{path=**}/comments/{cid} {
+      allow read: if canRead('projects');
+    }
     match /settings/{id} {
       allow read:  if isActiveMember();
       allow write: if canWrite('settings');

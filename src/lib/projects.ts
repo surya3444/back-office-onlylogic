@@ -1,5 +1,6 @@
 import {
   collection, addDoc, updateDoc, doc, deleteDoc, serverTimestamp,
+  onSnapshot, query, orderBy,
 } from "firebase/firestore";
 import { db } from "./firebase";
 import { logAction } from "./audit";
@@ -18,12 +19,22 @@ export interface ProjectClient {
 
 export type StageStatus = "pending" | "active" | "done";
 
+// A concrete thing shipped (or to ship) within a stage — surfaced to the client.
+export interface StageFeature {
+  id: string;
+  text: string;
+  done?: boolean;
+}
+
 export interface ProjectStage {
   id: string;
   name: string;
   description?: string;
   status: StageStatus;
   completedAt?: number | null;
+  deadline?: number | null;        // ms timestamp — client-visible target date
+  link?: string;                   // live/preview URL — client-visible "View" button
+  features?: StageFeature[];       // what's being shipped in this stage
 }
 
 export type MilestoneKind = "percent" | "fixed";
@@ -75,6 +86,44 @@ export interface PortalAccess {
 
 export type ProjectStatus = "active" | "on-hold" | "completed";
 
+// ── Access control ──────────────────────────────────────────────────────────
+// The sections a project is divided into — used to gate what an assigned
+// member (team or client) can see, and the keys match the detail-page tabs.
+export type ProjectSection =
+  | "overview" | "timeline" | "payments" | "requirements" | "access" | "comments";
+
+export const PROJECT_SECTIONS: { key: ProjectSection; label: string }[] = [
+  { key: "overview", label: "Overview" },
+  { key: "timeline", label: "Timeline" },
+  { key: "payments", label: "Payments" },
+  { key: "requirements", label: "Requirements" },
+  { key: "comments", label: "Feedback" },
+  { key: "access", label: "Client Access" },
+];
+
+// A person assigned to a project. `team` members are back-office accounts
+// (matched by uid); `client` members are portal users (matched by email).
+export interface ProjectMember {
+  id: string;                 // member uid (team) or client id (client)
+  kind: "team" | "client";
+  name: string;
+  email: string;
+  sections: ProjectSection[]; // which sections this person may see
+  canWrite: boolean;          // may edit the sections they can see
+  hidePayments: boolean;      // hide ₹ amounts — show only Paid / Due
+}
+
+// Client feedback on a stage. Stored in subcollection projects/{id}/comments.
+export interface StageComment {
+  id: string;
+  stageId: string;
+  author: string;
+  email?: string;
+  role: "client" | "team";
+  text: string;
+  createdAt: number;
+}
+
 export interface Project {
   id: string;
   title: string;
@@ -85,7 +134,26 @@ export interface Project {
   payment: Payment;
   requirementForm: RequirementForm;
   portal: PortalAccess | null;
+  members?: ProjectMember[];
   createdAt?: any;
+}
+
+// All sections, granted by default when a member is first added.
+export const ALL_SECTIONS: ProjectSection[] = PROJECT_SECTIONS.map((s) => s.key);
+
+// Resolve the access entry for the signed-in member (by uid) or client (by email).
+export function memberAccess(project: Project, opts: { uid?: string; email?: string }): ProjectMember | null {
+  const list = project.members || [];
+  if (opts.uid) {
+    const m = list.find((x) => x.kind === "team" && x.id === opts.uid);
+    if (m) return m;
+  }
+  if (opts.email) {
+    const e = opts.email.trim().toLowerCase();
+    const m = list.find((x) => x.kind === "client" && x.email.trim().toLowerCase() === e);
+    if (m) return m;
+  }
+  return null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -135,8 +203,14 @@ export function newProjectDoc(title: string, summary: string, clients: ProjectCl
     payment: { total: 0, currency: "INR", milestones: [] as PaymentMilestone[] } as Payment,
     requirementForm: emptyForm(),
     portal: null as PortalAccess | null,
+    members: [] as ProjectMember[],
     createdAt: serverTimestamp(),
   };
+}
+
+// Default access grant for a newly-assigned member — sees everything, read-only.
+export function defaultMember(p: { id: string; kind: "team" | "client"; name: string; email: string }): ProjectMember {
+  return { ...p, sections: [...ALL_SECTIONS], canWrite: p.kind === "team", hidePayments: false };
 }
 
 // ── Firestore ops ─────────────────────────────────────────────────────────
@@ -154,4 +228,20 @@ export async function patchProject(id: string, data: Partial<Omit<Project, "id">
 export async function removeProject(id: string, title: string) {
   await deleteDoc(doc(db, "projects", id));
   await logAction("Deleted project", title);
+}
+
+// ── Stage comments (client ↔ team feedback) ─────────────────────────────────
+
+export async function addStageComment(projectId: string, c: Omit<StageComment, "id">) {
+  await addDoc(collection(db, "projects", projectId, "comments"), c);
+}
+
+export function streamStageComments(projectId: string, cb: (list: StageComment[]) => void) {
+  const q = query(collection(db, "projects", projectId, "comments"), orderBy("createdAt", "asc"));
+  return onSnapshot(q, (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as StageComment[]),
+    () => cb([]));
+}
+
+export async function removeStageComment(projectId: string, commentId: string) {
+  await deleteDoc(doc(db, "projects", projectId, "comments", commentId));
 }

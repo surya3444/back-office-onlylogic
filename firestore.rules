@@ -31,6 +31,34 @@ service cloud.firestore {
       allow write: if signedIn();
     }
 
+    // Client projects. The public portal reads a single project by its
+    // unguessable id, submits its requirements form, and (via the payment
+    // verify route) marks a milestone paid — both narrow, field-scoped updates.
+    match /projects/{id} {
+      allow read: if true;
+      allow create, delete: if signedIn();
+      allow update: if signedIn()
+        || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['requirementForm'])
+        || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['payment']);
+
+      // Stage feedback — clients post from the portal; team manages from the app.
+      match /comments/{cid} {
+        allow read:   if true;
+        allow create: if true;
+        allow update, delete: if signedIn();
+      }
+    }
+
+    // Our own in-house product builds — back-office only.
+    match /ourProjects/{id} { allow read, write: if signedIn(); }
+
+    // Collection-group read for stage feedback: the Projects Dashboard aggregates
+    // comments across every project. (Per-project access is covered above; a
+    // collectionGroup query needs its own rule and is back-office only.)
+    match /{path=**}/comments/{cid} {
+      allow read: if signedIn();
+    }
+
     // Back-office collections — any signed-in account; the app's roles decide
     // what each member actually sees and can change.
     match /clients/{id}   { allow read, write: if signedIn(); }

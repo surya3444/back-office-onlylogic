@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
-import { Inbox, Users, FolderKanban, Settings as SettingsIcon, LogOut, Package, Menu, X, Layers, ChevronDown, ChevronRight, PanelLeftClose, PanelLeftOpen, CalendarClock, LayoutDashboard, ShieldCheck, History, UserCog, Search, Bell } from "lucide-react";
+import { Inbox, Users, FolderKanban, Settings as SettingsIcon, LogOut, Package, Menu, X, Layers, ChevronDown, ChevronRight, PanelLeftClose, PanelLeftOpen, CalendarClock, LayoutDashboard, ShieldCheck, History, UserCog, Search, Bell, GanttChartSquare, Boxes, SlidersHorizontal } from "lucide-react";
 import { useAuth } from "../lib/auth-context";
 import { db } from "../lib/firebase";
 
@@ -16,8 +16,15 @@ const LEAD_ITEMS: NavItem[] = [
   { name: "Settings", path: "/settings", icon: SettingsIcon, module: "settings" },
 ];
 
-const STANDALONE_ITEMS: NavItem[] = [
+const PROJECT_ITEMS: NavItem[] = [
+  { name: "Dashboard", path: "/projects/dashboard", icon: LayoutDashboard, module: "projects" },
   { name: "Projects", path: "/projects", icon: FolderKanban, module: "projects" },
+  { name: "Our Projects", path: "/our-projects", icon: Boxes, module: "projects" },
+];
+
+const PROJECT_SETTINGS_ITEM: NavItem = { name: "Project Settings", path: "/project-settings", icon: SlidersHorizontal, module: "projects" };
+
+const STANDALONE_ITEMS: NavItem[] = [
   { name: "Products", path: "/products", icon: Package, module: "products" },
 ];
 
@@ -34,6 +41,7 @@ export default function Layout() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [leadsOpen, setLeadsOpen] = useState(true);
+  const [projectsOpen, setProjectsOpen] = useState(true);
   const [adminOpen, setAdminOpen] = useState(true);
   const [search, setSearch] = useState("");
   const [newLeads, setNewLeads] = useState(0);
@@ -42,7 +50,12 @@ export default function Layout() {
 
   const leadItems = LEAD_ITEMS.filter((i) => can(i.module, "read"));
   const standalone = STANDALONE_ITEMS.filter((i) => can(i.module, "read"));
+  const canProjects = can("projects", "read");
+  const projectItems = canProjects
+    ? [...PROJECT_ITEMS, ...(isAdmin ? [PROJECT_SETTINGS_ITEM] : [])]
+    : [];
   const isLeadActive = leadItems.some((i) => i.path === location.pathname);
+  const isProjectsActive = location.pathname.startsWith("/projects") || location.pathname.startsWith("/our-projects") || location.pathname === "/project-settings";
   const isAdminActive = ADMIN_ITEMS.some((i) => i.path === location.pathname);
   const canSeeLeads = can("leads", "read") || can("dashboard", "read") || can("pipeline", "read");
 
@@ -97,6 +110,12 @@ export default function Layout() {
           {leadItems.length > 0 && (
             <NavGroup label="Lead Management" icon={Inbox} items={leadItems} isCollapsed={isCollapsed}
               open={leadsOpen} setOpen={setLeadsOpen} active={isLeadActive} pathname={location.pathname}
+              closeMenu={closeMenu} expand={() => setIsCollapsed(false)} />
+          )}
+
+          {projectItems.length > 0 && (
+            <NavGroup label="Projects" icon={GanttChartSquare} items={projectItems} isCollapsed={isCollapsed}
+              open={projectsOpen} setOpen={setProjectsOpen} active={isProjectsActive} pathname={location.pathname}
               closeMenu={closeMenu} expand={() => setIsCollapsed(false)} />
           )}
 
@@ -169,9 +188,9 @@ export default function Layout() {
           </div>
         </header>
 
-        {/* Routed page content */}
+        {/* Routed page content — project pages run fullscreen (edge-to-edge). */}
         <main className="flex-1 overflow-auto">
-          <div className="p-5 md:p-8 lg:p-10 max-w-[1400px] mx-auto pb-24 md:pb-10">
+          <div className={`p-5 md:p-8 lg:p-10 mx-auto pb-24 md:pb-10 ${isProjectsActive ? "max-w-[1760px]" : "max-w-[1400px]"}`}>
             <Outlet />
           </div>
         </main>

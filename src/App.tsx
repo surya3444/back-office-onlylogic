@@ -11,6 +11,10 @@ import Leads from "./pages/Leads";
 import Login from "./pages/Login";
 import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
+import ProjectsDashboard from "./pages/ProjectsDashboard";
+import OurProjects from "./pages/OurProjects";
+import OurProjectDetail from "./pages/OurProjectDetail";
+import ProjectSettings from "./pages/ProjectSettings";
 import CRM from "./pages/CRM";
 import ProductsAdmin from "./pages/ProductsAdmin";
 import LeadPipeline from "./pages/LeadPipeline";
@@ -57,8 +61,12 @@ function AppRoutes() {
         <Route path="pipeline" element={<Guard m="pipeline"><LeadPipeline /></Guard>} />
         <Route path="followups" element={<Guard m="followups"><FollowUps /></Guard>} />
         <Route path="crm" element={<Guard m="crm"><CRM /></Guard>} />
+        <Route path="projects/dashboard" element={<Guard m="projects"><ProjectsDashboard /></Guard>} />
         <Route path="projects" element={<Guard m="projects"><Projects /></Guard>} />
         <Route path="projects/:id" element={<Guard m="projects"><ProjectDetail /></Guard>} />
+        <Route path="our-projects" element={<Guard m="projects"><OurProjects /></Guard>} />
+        <Route path="our-projects/:id" element={<Guard m="projects"><OurProjectDetail /></Guard>} />
+        <Route path="project-settings" element={<AdminGuard><ProjectSettings /></AdminGuard>} />
         <Route path="products" element={<Guard m="products"><ProductsAdmin /></Guard>} />
         <Route path="settings" element={<Guard m="settings"><Settings /></Guard>} />
         <Route path="profile" element={<Profile />} />
