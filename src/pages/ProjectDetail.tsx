@@ -32,7 +32,7 @@ function normalize(p: any): Project {
   };
 }
 
-const PORTAL_BASE = (import.meta.env.VITE_PORTAL_URL as string) || "https://only-ogic.netlify.app/portal";
+const PORTAL_BASE = (import.meta.env.VITE_PORTAL_URL as string) || "https://onlylogic.netlify.app/portal";
 
 type Tab = "overview" | "timeline" | "payments" | "requirements" | "access";
 
