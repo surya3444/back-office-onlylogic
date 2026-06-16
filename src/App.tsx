@@ -10,6 +10,7 @@ import Dashboard from "./pages/Dashboard";
 import Leads from "./pages/Leads";
 import Login from "./pages/Login";
 import Projects from "./pages/Projects";
+import ProjectDetail from "./pages/ProjectDetail";
 import CRM from "./pages/CRM";
 import ProductsAdmin from "./pages/ProductsAdmin";
 import LeadPipeline from "./pages/LeadPipeline";
@@ -57,6 +58,7 @@ function AppRoutes() {
         <Route path="followups" element={<Guard m="followups"><FollowUps /></Guard>} />
         <Route path="crm" element={<Guard m="crm"><CRM /></Guard>} />
         <Route path="projects" element={<Guard m="projects"><Projects /></Guard>} />
+        <Route path="projects/:id" element={<Guard m="projects"><ProjectDetail /></Guard>} />
         <Route path="products" element={<Guard m="products"><ProductsAdmin /></Guard>} />
         <Route path="settings" element={<Guard m="settings"><Settings /></Guard>} />
         <Route path="profile" element={<Profile />} />

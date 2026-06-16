@@ -1,256 +1,233 @@
-import { useState, useEffect } from "react";
-import { collection, onSnapshot, query, orderBy, doc, updateDoc, addDoc, serverTimestamp } from "firebase/firestore";
+import { useEffect, useMemo, useState } from "react";
+import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
+import { useNavigate } from "react-router-dom";
 import { db } from "../lib/firebase";
-import { Plus, MoreHorizontal, Calendar, X } from "lucide-react";
+import { Plus, X, FolderKanban, Search, Users, ChevronRight, CircleDollarSign, ListChecks, Check } from "lucide-react";
+import { PageHeader, Loader, EmptyState } from "../components/ui";
+import { useAuth } from "../lib/auth-context";
+import {
+  createProject, milestoneAmount, formatINR,
+  type Project, type ProjectClient,
+} from "../lib/projects";
 
-interface Project {
-  id: string;
-  title: string;
-  client: string;
-  stage: string;
-  dueDate: string;
-  createdAt?: any;
-}
+interface ClientRow { id: string; name: string; company?: string; email: string; }
 
-const STAGES = ["Understand", "Design", "Build", "Automate", "Scale"];
+const STATUS_STYLES: Record<string, string> = {
+  active: "bg-[#EDEFFF] text-[#2B41E0]",
+  "on-hold": "bg-[#FFF4E5] text-[#B7791F]",
+  completed: "bg-[#E6F6EF] text-[#0F9D6B]",
+};
 
 export default function Projects() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
-  
-  // Modal State for adding new projects
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [newProject, setNewProject] = useState({
-    title: "",
-    client: "",
-    dueDate: "",
-  });
+  const navigate = useNavigate();
+  const { can } = useAuth();
+  const canWrite = can("projects", "write");
 
-  // 1. Listen to the 'projects' collection in real-time
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [clients, setClients] = useState<ClientRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const [showModal, setShowModal] = useState(false);
+
   useEffect(() => {
     const q = query(collection(db, "projects"), orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const projectData = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as Project[];
-      
-      setProjects(projectData);
+    const unsub = onSnapshot(q, (snap) => {
+      setProjects(snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Project[]);
       setLoading(false);
     });
-
-    return () => unsubscribe();
+    return () => unsub();
   }, []);
 
-  // 2. Handle HTML5 Drag and Drop
-  const handleDragStart = (e: React.DragEvent, projectId: string) => {
-    e.dataTransfer.setData("projectId", projectId);
-    e.dataTransfer.effectAllowed = "move";
-  };
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "clients"), (snap) => {
+      setClients(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as ClientRow[]);
+    });
+    return () => unsub();
+  }, []);
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault(); // Necessary to allow dropping
-    e.dataTransfer.dropEffect = "move";
-  };
+  if (loading) return <Loader label="Loading projects" sub="Pulling your active builds" />;
 
-  const handleDrop = async (e: React.DragEvent, targetStage: string) => {
-    e.preventDefault();
-    const projectId = e.dataTransfer.getData("projectId");
-    if (!projectId) return;
-
-    // Check if the stage actually changed
-    const project = projects.find(p => p.id === projectId);
-    if (project && project.stage !== targetStage) {
-      try {
-        const projectRef = doc(db, "projects", projectId);
-        await updateDoc(projectRef, { stage: targetStage });
-      } catch (error) {
-        console.error("Error updating project stage:", error);
-      }
-    }
-  };
-
-  // 3. Handle adding a new project
-  const handleAddProject = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newProject.title || !newProject.client) return;
-    
-    setIsSubmitting(true);
-    try {
-      await addDoc(collection(db, "projects"), {
-        title: newProject.title,
-        client: newProject.client,
-        dueDate: newProject.dueDate || "TBD",
-        stage: "Understand", // Always defaults to the first stage
-        createdAt: serverTimestamp()
-      });
-      setShowAddModal(false);
-      setNewProject({ title: "", client: "", dueDate: "" });
-    } catch (error) {
-      console.error("Error adding project:", error);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  if (loading) return <div className="text-[#9AA0AD] animate-pulse font-medium">Loading project board...</div>;
+  const activeCount = projects.filter((p) => p.status === "active").length;
 
   return (
-    <div className="font-['Poppins',sans-serif] h-full flex flex-col relative">
-      {/* Header Section */}
-      <div className="flex justify-between items-end mb-8">
-        <div>
-          <div className="font-mono text-[12px] text-[#FF5C49] tracking-[0.16em] uppercase font-medium flex items-center gap-2 mb-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#FF5C49]"></span>
-            Active Builds
-          </div>
-          <h1 className="text-[32px] font-bold text-[#13182B] leading-none tracking-tight">Project Pipeline</h1>
-        </div>
-        <button 
-          onClick={() => setShowAddModal(true)}
-          className="bg-[#13182B] text-white px-5 py-2.5 rounded-xl font-semibold text-[14.5px] flex items-center gap-2 hover:-translate-y-0.5 transition-transform shadow-[0_10px_20px_-10px_rgba(19,24,43,0.5)]"
-        >
-          <Plus size={18} />
-          New Project
-        </button>
-      </div>
+    <div className="font-['Poppins',sans-serif] relative">
+      <PageHeader
+        icon={FolderKanban}
+        eyebrow="Delivery"
+        accent="#2B41E0"
+        title="Projects"
+        subtitle="Each project bundles its clients, a custom timeline, a payment schedule and a requirements form — everything your client tracks in their portal."
+        stats={[
+          { label: "Active", value: activeCount, accent: "#2B41E0" },
+          { label: "Total", value: projects.length, accent: "#13182B" },
+        ]}
+        actions={canWrite && (
+          <button
+            onClick={() => setShowModal(true)}
+            className="bg-[#13182B] text-white px-5 py-2.5 rounded-xl font-semibold text-[14.5px] flex items-center gap-2 hover:-translate-y-0.5 transition-transform shadow-md justify-center"
+          >
+            <Plus size={18} /> New Project
+          </button>
+        )}
+      />
 
-      {/* Kanban Board */}
-      <div className="flex gap-6 overflow-x-auto pb-4 flex-1">
-        {STAGES.map((stage) => {
-          const columnProjects = projects.filter((p) => p.stage === stage);
-          
-          return (
-            <div 
-              key={stage} 
-              className="min-w-[320px] w-[320px] flex flex-col"
-              onDragOver={handleDragOver}
-              onDrop={(e) => handleDrop(e, stage)}
-            >
-              {/* Column Header */}
-              <div className="flex justify-between items-center mb-4 px-1">
-                <h3 className="font-semibold text-[#13182B] text-[16px]">{stage}</h3>
-                <span className="bg-[#E5E2D9] text-[#6B7283] font-mono text-[11px] px-2 py-0.5 rounded-full font-semibold">
-                  {columnProjects.length}
-                </span>
-              </div>
-
-              {/* Column Content */}
-              <div className="bg-[#F4F2EC] border border-[#E5E2D9] rounded-[20px] p-3 flex-1 flex flex-col gap-3 min-h-[500px] transition-colors duration-200">
-                {columnProjects.map((project) => (
-                  <div 
-                    key={project.id}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, project.id)}
-                    className="bg-[#FFFFFF] border border-[#D7D3C7] rounded-2xl p-5 hover:border-[#FF5C49] transition-colors cursor-grab active:cursor-grabbing group shadow-sm hover:shadow-md"
-                  >
-                    <div className="flex justify-between items-start mb-3">
-                      <span className="bg-[#EDEFFF] text-[#2B41E0] font-mono text-[10px] px-2 py-1 rounded-md uppercase tracking-wider font-semibold truncate max-w-[180px]">
-                        {project.client}
-                      </span>
-                      <button className="text-[#9AA0AD] hover:text-[#13182B] transition-colors">
-                        <MoreHorizontal size={16} />
-                      </button>
-                    </div>
-                    
-                    <h4 className="font-bold text-[#13182B] text-[17px] leading-tight mb-4">
-                      {project.title}
-                    </h4>
-                    
-                    <div className="flex items-center gap-2 text-[#6B7283] font-mono text-[12px] border-t border-[#E5E2D9] pt-3">
-                      <Calendar size={13} />
-                      <span>Due {project.dueDate}</span>
-                    </div>
-                  </div>
-                ))}
-                
-                {/* Empty State for Drop Zone */}
-                {columnProjects.length === 0 && (
-                  <div className="flex-1 border-2 border-dashed border-[#D7D3C7] rounded-2xl flex items-center justify-center text-[#9AA0AD] font-mono text-[12px] pointer-events-none">
-                    Drop here
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Add Project Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#13182B] bg-opacity-40 backdrop-blur-sm">
-          <div className="bg-[#FFFFFF] w-full max-w-md border border-[#D7D3C7] rounded-[24px] shadow-[0_30px_60px_-20px_rgba(19,24,43,0.3)] overflow-hidden flex flex-col">
-            
-            <div className="px-8 py-6 border-b border-[#E5E2D9] flex justify-between items-center bg-[#FCFBF8]">
-              <div>
-                <div className="font-mono text-[11px] text-[#FF5C49] tracking-[0.16em] uppercase font-semibold mb-1">Pipeline</div>
-                <h2 className="text-[22px] font-bold text-[#13182B] leading-none">Add New Project</h2>
-              </div>
-              <button 
-                onClick={() => setShowAddModal(false)} 
-                className="w-8 h-8 flex items-center justify-center rounded-full bg-[#E5E2D9] text-[#6B7283] hover:bg-[#D7D3C7] transition-colors"
-              >
-                <X size={16} strokeWidth={2.5} />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddProject} className="p-8 flex flex-col gap-5">
-              <div>
-                <label className="block font-mono text-[12px] text-[#6B7283] mb-[7px]">Project Title</label>
-                <input
-                  type="text"
-                  value={newProject.title}
-                  onChange={(e) => setNewProject({...newProject, title: e.target.value})}
-                  placeholder="e.g. NGO Management App"
-                  className="w-full px-[14px] py-[13px] rounded-xl border border-[#D7D3C7] bg-[#FCFBF8] text-[#13182B] text-[15px] focus:outline-none focus:border-[#FF5C49] focus:shadow-[0_0_0_4px_#FFEDE9] transition-all"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label className="block font-mono text-[12px] text-[#6B7283] mb-[7px]">Client Name</label>
-                <input
-                  type="text"
-                  value={newProject.client}
-                  onChange={(e) => setNewProject({...newProject, client: e.target.value})}
-                  placeholder="e.g. Hope Foundation"
-                  className="w-full px-[14px] py-[13px] rounded-xl border border-[#D7D3C7] bg-[#FCFBF8] text-[#13182B] text-[15px] focus:outline-none focus:border-[#FF5C49] focus:shadow-[0_0_0_4px_#FFEDE9] transition-all"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block font-mono text-[12px] text-[#6B7283] mb-[7px]">Due Date</label>
-                <input
-                  type="text"
-                  value={newProject.dueDate}
-                  onChange={(e) => setNewProject({...newProject, dueDate: e.target.value})}
-                  placeholder="e.g. Q4 2026, or Nov 1st"
-                  className="w-full px-[14px] py-[13px] rounded-xl border border-[#D7D3C7] bg-[#FCFBF8] text-[#13182B] text-[15px] focus:outline-none focus:border-[#FF5C49] focus:shadow-[0_0_0_4px_#FFEDE9] transition-all"
-                />
-              </div>
-
-              <div className="mt-4 flex gap-3">
-                <button 
-                  type="button" 
-                  onClick={() => setShowAddModal(false)}
-                  className="flex-1 bg-[#F4F2EC] text-[#6B7283] font-semibold text-[15px] py-[15px] rounded-xl hover:bg-[#E5E2D9] transition-colors"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="flex-1 bg-[#13182B] text-white font-semibold text-[15px] py-[15px] rounded-xl shadow-[0_14px_30px_-14px_rgba(19,24,43,0.55)] hover:-translate-y-[2px] transition-transform disabled:opacity-70 disabled:cursor-not-allowed"
-                >
-                  {isSubmitting ? "Adding..." : "Add Project"}
-                </button>
-              </div>
-            </form>
-          </div>
+      {projects.length === 0 ? (
+        <EmptyState icon={FolderKanban} title="No projects yet" sub="Create your first project and add the clients from your CRM who'll be tracking it." />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 animate-fade-up">
+          {projects.map((p) => <ProjectCard key={p.id} p={p} onOpen={() => navigate(`/projects/${p.id}`)} />)}
         </div>
       )}
+
+      {showModal && (
+        <NewProjectModal clients={clients} onClose={() => setShowModal(false)} onCreated={(id) => { setShowModal(false); navigate(`/projects/${id}`); }} />
+      )}
+    </div>
+  );
+}
+
+function ProjectCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
+  const stages = p.stages || [];
+  const done = stages.filter((s) => s.status === "done").length;
+  const pct = stages.length ? Math.round((done / stages.length) * 100) : 0;
+  const total = p.payment?.total || 0;
+  const paid = (p.payment?.milestones || [])
+    .filter((m) => m.status === "paid")
+    .reduce((sum, m) => sum + milestoneAmount(m, total), 0);
+
+  return (
+    <button
+      onClick={onOpen}
+      className="text-left bg-white border border-[#D7D3C7] rounded-[20px] p-6 hover:border-[#2B41E0] transition-colors group shadow-sm hover:shadow-md flex flex-col"
+    >
+      <div className="flex justify-between items-start mb-4">
+        <span className={`font-mono text-[10px] px-2.5 py-1 rounded-md uppercase tracking-wider font-semibold ${STATUS_STYLES[p.status] || STATUS_STYLES.active}`}>
+          {p.status}
+        </span>
+        <ChevronRight size={18} className="text-[#9AA0AD] group-hover:text-[#2B41E0] transition-colors" />
+      </div>
+
+      <h3 className="font-bold text-[#13182B] text-[19px] leading-tight mb-1.5">{p.title}</h3>
+      <div className="flex items-center gap-1.5 text-[#6B7283] text-[13px] mb-5">
+        <Users size={13} className="text-[#9AA0AD]" />
+        <span className="truncate">{(p.clients || []).map((c) => c.name).join(", ") || "No clients yet"}</span>
+      </div>
+
+      <div className="mt-auto space-y-3.5 pt-4 border-t border-[#E5E2D9]">
+        <div>
+          <div className="flex justify-between items-center mb-1.5">
+            <span className="flex items-center gap-1.5 font-mono text-[11px] text-[#6B7283]"><ListChecks size={12} /> Timeline</span>
+            <span className="font-mono text-[11px] text-[#13182B] font-semibold">{done}/{stages.length} · {pct}%</span>
+          </div>
+          <div className="h-1.5 rounded-full bg-[#E5E2D9] overflow-hidden">
+            <div className="h-full bg-[#2B41E0] rounded-full transition-all" style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="flex items-center gap-1.5 font-mono text-[11px] text-[#6B7283]"><CircleDollarSign size={12} /> Payments</span>
+          <span className="font-mono text-[11px] text-[#13182B] font-semibold">{formatINR(paid)} <span className="text-[#9AA0AD]">/ {formatINR(total)}</span></span>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function NewProjectModal({ clients, onClose, onCreated }: {
+  clients: ClientRow[];
+  onClose: () => void;
+  onCreated: (id: string) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [summary, setSummary] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return clients;
+    return clients.filter((c) => `${c.name} ${c.company || ""} ${c.email}`.toLowerCase().includes(q));
+  }, [clients, search]);
+
+  const toggle = (id: string) => setPicked((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim() || picked.length === 0) return;
+    setSaving(true);
+    try {
+      const selected: ProjectClient[] = picked.map((id) => {
+        const c = clients.find((x) => x.id === id)!;
+        return { id: c.id, name: c.name, email: c.email, company: c.company === "N/A" ? "" : c.company };
+      });
+      const id = await createProject(title.trim(), summary.trim(), selected);
+      onCreated(id);
+    } catch (err) {
+      console.error("create project failed", err);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#13182B]/40 backdrop-blur-sm overflow-y-auto">
+      <div className="bg-white w-full max-w-lg border border-[#D7D3C7] rounded-[24px] shadow-2xl overflow-hidden flex flex-col my-8">
+        <div className="px-6 py-5 md:px-8 md:py-6 border-b border-[#E5E2D9] flex justify-between items-center bg-[#FCFBF8]">
+          <div>
+            <div className="font-mono text-[11px] text-[#2B41E0] tracking-[0.16em] uppercase font-semibold mb-1">New Project</div>
+            <h2 className="text-[20px] md:text-[22px] font-bold text-[#13182B] leading-none">Create a project</h2>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-[#E5E2D9] text-[#6B7283] hover:bg-[#D7D3C7]"><X size={16} strokeWidth={2.5} /></button>
+        </div>
+
+        <form onSubmit={submit} className="p-6 md:p-8 flex flex-col gap-5 max-h-[75vh] overflow-y-auto">
+          <div>
+            <label className="block font-mono text-[12px] text-[#6B7283] mb-[7px]">Project Title</label>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} required placeholder="e.g. NGO Management Platform"
+              className="w-full px-[14px] py-[13px] rounded-xl border border-[#D7D3C7] bg-[#FCFBF8] text-[#13182B] text-[15px] focus:border-[#2B41E0] outline-none" />
+          </div>
+          <div>
+            <label className="block font-mono text-[12px] text-[#6B7283] mb-[7px]">Summary <span className="text-[#9AA0AD]">(optional)</span></label>
+            <textarea value={summary} onChange={(e) => setSummary(e.target.value)} rows={2} placeholder="One line the client will see at the top of their portal."
+              className="w-full px-[14px] py-[13px] rounded-xl border border-[#D7D3C7] bg-[#FCFBF8] text-[#13182B] text-[15px] focus:border-[#2B41E0] outline-none resize-none" />
+          </div>
+
+          <div>
+            <label className="block font-mono text-[12px] text-[#6B7283] mb-2">Add clients from CRM <span className="text-[#9AA0AD]">({picked.length} selected)</span></label>
+            <div className="relative mb-2">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9AA0AD]" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search your clients…"
+                className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#D7D3C7] bg-[#FCFBF8] text-[14px] text-[#13182B] focus:border-[#2B41E0] outline-none" />
+            </div>
+            <div className="border border-[#E5E2D9] rounded-xl divide-y divide-[#EEEBE3] max-h-52 overflow-y-auto">
+              {filtered.length === 0 && (
+                <div className="p-4 text-[13px] text-[#9AA0AD] text-center">No clients found. Add them in the CRM first.</div>
+              )}
+              {filtered.map((c) => {
+                const on = picked.includes(c.id);
+                return (
+                  <button type="button" key={c.id} onClick={() => toggle(c.id)} className="w-full flex items-center gap-3 px-3.5 py-2.5 hover:bg-[#FCFBF8] text-left">
+                    <span className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${on ? "bg-[#2B41E0] border-[#2B41E0]" : "border-[#D7D3C7] bg-white"}`}>
+                      {on && <Check size={13} className="text-white" strokeWidth={3} />}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[14px] font-semibold text-[#13182B] truncate">{c.name}{c.company && c.company !== "N/A" ? <span className="text-[#9AA0AD] font-normal"> · {c.company}</span> : ""}</span>
+                      <span className="block text-[12px] text-[#9AA0AD] truncate">{c.email}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="flex gap-3 mt-2">
+            <button type="button" onClick={onClose} className="flex-1 bg-[#F4F2EC] text-[#6B7283] font-semibold py-3 rounded-xl hover:bg-[#E5E2D9] transition-colors">Cancel</button>
+            <button type="submit" disabled={saving || !title.trim() || picked.length === 0}
+              className="flex-1 bg-[#13182B] text-white font-semibold py-3 rounded-xl shadow-md hover:-translate-y-[2px] transition-transform disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0">
+              {saving ? "Creating…" : "Create Project"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
